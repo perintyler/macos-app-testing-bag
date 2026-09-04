@@ -42,9 +42,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * guess falls through to the next instead of failing as "not built".
  */
 function candidateRoots(): string[] {
+  // An explicit override is AUTHORITATIVE, not merely first. Falling through to
+  // another checkout when it does not pan out would run a binary the caller did
+  // not point at and report success — the wrong-target failure this bag refuses
+  // elsewhere by making an ambiguous app a hard error.
   const fromEnv = process.env.MACOS_APP_TESTING_DIR ?? process.env.BARRY_BAG_DIR;
+  if (fromEnv) return [fromEnv];
   return [
-    ...(fromEnv ? [fromEnv] : []),
     resolve(HERE, ".."),
     resolve(HERE, "../.."),
     resolve(homedir(), "repos/bags/macos-app-testing"),
@@ -69,20 +73,88 @@ export function probeBinaryPath(): string | null {
   return buildPaths().find((p) => existsSync(p)) ?? null;
 }
 
+/** A candidate root is the bag itself only if it carries the probe's sources. */
+function packageRoot(): string | null {
+  return candidateRoots().find((root) => existsSync(resolve(root, "Package.swift"))) ?? null;
+}
+
 /**
- * Locate the built probe, or explain how to build it. Reported as a normal
- * failure rather than a thrown ENOENT so the caller sees the fix.
+ * One build at a time, shared by every caller in this process.
+ *
+ * Tool handlers run concurrently, so without this a session calling three
+ * tools at once would start three `swift build`s against the same .build
+ * directory. SwiftPM takes its own file lock, so they would serialize anyway —
+ * but each would pay full latency and the failure text would interleave.
  */
-function requireBinary(): string {
-  const found = probeBinaryPath();
-  if (found) return found;
+let building: Promise<string> | null = null;
+
+async function buildBinary(root: string): Promise<string> {
+  // `swift build` is quiet on success and writes diagnostics to stderr; a
+  // failure here is a real problem (no toolchain, broken source) and must not
+  // be reported as "not built", which would send the caller in a circle.
+  try {
+    await execFileAsync("swift", ["build", "-c", "release"], {
+      cwd: root,
+      timeout: 300_000, // a cold first build resolves the toolchain and can take minutes
+      killSignal: "SIGKILL",
+      maxBuffer: 8 * 1024 * 1024,
+    });
+  } catch (error) {
+    // SwiftPM prints compiler diagnostics to STDOUT, not stderr — reading only
+    // stderr drops the actual reason and leaves a generic "is the toolchain
+    // installed?", which sends the caller after the wrong problem.
+    const err = error as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+    const output = [err.stdout, err.stderr].filter(Boolean).join("\n").trim();
+    const detail = output ? output.split("\n").slice(-8).join("\n") : "";
+    throw new AxProbeError(
+      "ax-error",
+      `axprobe is missing and \`swift build -c release\` failed in ${root}.` +
+        (detail ? `\n${detail}` : " No output from swift — is the toolchain installed?"),
+      [],
+      detail,
+    );
+  }
+
+  const built = probeBinaryPath();
+  if (built) return built;
+  // The build reported success and the binary still is not there — say exactly
+  // that rather than looping or claiming a build is needed again.
   throw new AxProbeError(
     "ax-error",
-    "axprobe is not built. Run `swift build -c release` in the macos-app-testing bag " +
-      `(looked in: ${candidateRoots().join(", ")}), or set MACOS_APP_TESTING_DIR to it.`,
+    `\`swift build -c release\` succeeded in ${root} but no axprobe binary appeared under .build/.`,
     [],
     "",
   );
+}
+
+/**
+ * Locate the built probe, building it once on demand if it is missing.
+ *
+ * The binary is a build product that does not survive a fresh clone, and
+ * `barry install` does not build it — so without this the bag registers, loads
+ * all its tools, and fails on the first real call. Building on demand costs one
+ * compile the first time and nothing afterwards.
+ */
+async function requireBinary(): Promise<string> {
+  const found = probeBinaryPath();
+  if (found) return found;
+
+  const root = packageRoot();
+  if (!root) {
+    throw new AxProbeError(
+      "ax-error",
+      "axprobe is not built and its sources were not found " +
+        `(looked in: ${candidateRoots().join(", ")}). ` +
+        "Set MACOS_APP_TESTING_DIR to the macos-app-testing bag directory.",
+      [],
+      "",
+    );
+  }
+
+  building ??= buildBinary(root).finally(() => {
+    building = null;
+  });
+  return building;
 }
 
 export interface ProbeResult {
@@ -101,7 +173,7 @@ export async function runProbe(
   args: string[],
   options: { timeoutSeconds?: number } = {},
 ): Promise<ProbeResult> {
-  const binary = requireBinary();
+  const binary = await requireBinary();
   const pollMs = (options.timeoutSeconds ?? 0) * 1000;
   const timeout = Math.max(DEFAULT_TIMEOUT_MS, pollMs + 10_000);
 

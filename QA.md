@@ -18,7 +18,7 @@ parts that need a real window on a real screen.
 
 ```bash
 cd ~/repos/bags/macos-app-testing
-swift build -c release
+swift build -c release   # or let step 11 build it on demand
 pnpm install
 P=.build/release/axprobe
 ```
@@ -143,6 +143,22 @@ console.log((await m.assertWindowHealthy.handler({app:'Finder'}, undefined)).ok)
 
 **Expected:** `state: 'ready'` and `true` — not "axprobe is not built".
 
+### 11. It builds itself when the binary is missing
+
+The binary is a build product that does not survive a fresh clone, and
+`barry install` does not build it.
+
+```bash
+mv .build /tmp/build-backup
+npx tsx -e 'import("./src/tools.js").then(async m => {
+  const t = Date.now();
+  console.log(await m.status.handler({}, undefined), Date.now() - t + "ms");
+})'
+```
+
+**Expected:** `state: 'ready'` after a one-time compile (~15s), not "axprobe is
+not built". A second call returns in milliseconds.
+
 ## Success Criteria
 
 - [ ] `swift build -c release`, `tsc --noEmit` and `vitest run` all pass
@@ -156,6 +172,7 @@ console.log((await m.assertWindowHealthy.handler({app:'Finder'}, undefined)).ok)
 - [ ] `wait` returns immediately when present and fails at the timeout when not
 - [ ] `screenshot` writes a window-scoped PNG
 - [ ] the tools work when called through the built bundle, not only from `src/`
+- [ ] a missing binary is built on demand rather than failing the call
 
 ## Cleanup
 

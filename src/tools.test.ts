@@ -111,6 +111,28 @@ describe("probe binary resolution", () => {
     expect(found).toMatch(/\.build\/(release|debug)\/axprobe$/);
   });
 
+  it("treats an explicit override as authoritative, not merely first", () => {
+    const source = readFileSync(resolve(HERE, "probe.ts"), "utf8");
+    // Falling through past MACOS_APP_TESTING_DIR to another checkout would run
+    // a binary the caller did not point at — and report success. Found live:
+    // an isolated tree silently resolved to ~/repos/bags.
+    expect(source).toMatch(/if \(fromEnv\) return \[fromEnv\]/);
+  });
+
+  it("reads swift's stdout when a build fails", () => {
+    const source = readFileSync(resolve(HERE, "probe.ts"), "utf8");
+    // SwiftPM writes compiler diagnostics to stdout; reading only stderr loses
+    // the reason and misreports a broken source as a missing toolchain.
+    expect(source).toMatch(/err\.stdout/);
+  });
+
+  it("builds at most once across concurrent callers", () => {
+    const source = readFileSync(resolve(HERE, "probe.ts"), "utf8");
+    // Tool handlers run concurrently; without a shared promise each would
+    // start its own `swift build` against one .build directory.
+    expect(source).toMatch(/building \?\?=/);
+  });
+
   it("does not depend on the module's own location", async () => {
     const source = readFileSync(resolve(HERE, "probe.ts"), "utf8");
     // A single hardcoded root relative to import.meta.url is the bug: the

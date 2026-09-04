@@ -40,9 +40,14 @@ enforces this rather than trusting it.
 ## Setup
 
 ```bash
-swift build -c release   # builds the axprobe binary
 pnpm install
 ```
+
+The `axprobe` binary builds itself on first use — the first tool call after a
+fresh clone pays one compile (~15s) and every call after it is instant. Build it
+ahead of time with `swift build -c release` if you would rather not pay that
+inside a run. A build failure reports swift's own diagnostics, so a missing
+toolchain and a broken source read differently.
 
 Then grant **Accessibility** permission to whatever runs the tools (your
 terminal, or the Barry runner) in System Settings → Privacy & Security →
