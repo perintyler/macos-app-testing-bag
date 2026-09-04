@@ -1,0 +1,99 @@
+version: 1
+name: macos-app-qa
+description: QA a native macOS app through its accessibility tree. Use when asked to test, verify, or check a Mac app's UI — whether a window renders, whether a control works, or whether a UI change actually took effect.
+prompt: |-
+  # QA-ing a native macOS app
+
+  The rule this exists for: **a running process is not a visible window.** An app
+  whose hosted view discards its configured size launches, stays alive, responds
+  to signals and passes every liveness check while showing nothing at all. If a
+  check would report the same thing when the app is broken as when it works, it
+  is not a check.
+
+  So never conclude "the app works" from `pgrep`, an exit code, or a log line.
+  Ask the window how big it is.
+
+  ## The loop: launch → wait → assert → clean up
+
+  ```
+  build → launch with a UI-test env hook → wait_for_element → assert → quit
+  ```
+
+  1. **Build and launch.** Launch a fresh copy with `open -n`, and set whatever
+     env var the app uses to expose itself for testing.
+  2. **Wait, don't sleep.** Use `wait_for_element` with a timeout. A fixed
+     `sleep 3` either races the app's launch or makes every run pay the worst
+     case; it is the main source of flakiness in UI tests.
+  3. **Assert.** Start with `assert_window_healthy` — it catches the whole class
+     of "alive but invisible" defects. Then assert the specific behavior.
+  4. **Clean up with a trap**, so a failed assertion does not leave the app
+     running:
+
+     ```bash
+     cleanup() { osascript -e 'quit app "YourApp"' 2>/dev/null || true; }
+     trap cleanup EXIT
+     ```
+
+  ## Identify the right process
+
+  A freshly built app and an installed copy **share a bundle id**. The tools
+  refuse to guess and report `ambiguous-app` with each candidate's path — pass
+  `pid` to choose.
+
+  Take that refusal seriously: asserting against the installed copy while
+  testing a new build produces a green result that means nothing. Run `status`
+  first to see what is actually running.
+
+  ## Make the app testable
+
+  Elements are addressed by `AXIdentifier`. An app that sets none can still be
+  checked for window health and screenshotted, but nothing finer.
+
+  - In SwiftUI: `.accessibilityIdentifier("MessageScrollView")`.
+  - A chromeless app (menu-bar `NSStatusItem`, `NSPopover`) is **not in the
+    accessibility tree at all** until it opts in. BarrySessions does this behind
+    `BARRY_UI_TEST=1`, calling `NSApp.setAccessibilityChildren([contentView])`
+    and auto-opening the popover. Without a hook like that, there is nothing to
+    query.
+
+  ## Prove your check can fail
+
+  Before trusting a new assertion, make it go red on purpose — tighten a
+  threshold, point it at the wrong app, or check out the commit before the fix.
+  A regression test that has never failed is a claim, not evidence.
+
+  ## Never post synthetic input
+
+  Do not reach for `cliclick`, `osascript` keystrokes, System Events UI
+  scripting, or coordinate clicks — not even "just this once" for something the
+  AX API seems not to cover. A synthetic event lands wherever focus happens to
+  be, and the user is often sitting at this machine.
+
+  Use `click_element` (AXPress on the element) and `set_element_value` (a
+  targeted AXValue write). Scrolling is a value write too: set a scroll view's
+  `AXVerticalScrollBar` to a position in 0–1.
+
+  ## Tools
+
+  | Tool | Use it for |
+  |---|---|
+  | `status` | Permission state and which processes match an app — run this first |
+  | `assert_window_healthy` | The window is one a user could actually see |
+  | `wait_for_element` | Poll for readiness instead of sleeping |
+  | `find_element` / `snapshot_ui` | Discover selectors and read state |
+  | `list_windows` | Titles and frames |
+  | `screenshot_app` | Visual checks the AX tree cannot make (color, clipping) |
+  | `click_element` / `set_element_value` | Act on the app, safely |
+
+  Selectors: `id=Foo`, `id^=turn-`, `role=AXButton`, `title=Save`, `title*=Sav`.
+  Bare text means `id=`.
+
+  ## When something fails
+
+  - `permission-denied` — Accessibility is not granted to the process running
+    the tools. That is setup, not a bug in the app under test. Say so plainly.
+  - `app-not-running` — it never launched, or it crashed on startup. Check
+    stderr from the binary directly before assuming the harness is at fault.
+  - `ambiguous-app` — several processes share the bundle id; pick one with `pid`.
+  - `not-found` — the element has no identifier, or the view has not rendered
+    yet. Take a `snapshot_ui` and look before adjusting the selector.

@@ -1,0 +1,73 @@
+name: macos-app-testing
+description: Drive and assert native macOS app UI through the accessibility tree
+
+instructions: |
+  Testing a native Mac app means asking the app what it is actually showing.
+  A running process is not a visible window: an app whose hosted view discards
+  its configured size can launch, stay alive and pass every liveness check while
+  showing the user nothing. `assert_window_healthy` is the check that catches
+  that; a process check cannot.
+
+  - Accessibility permission is required, and it is granted per-binary — the
+    grant belongs to the process that runs these tools (your terminal, or the
+    Barry runner), not to the app being tested. `status` reports the real
+    answer; if it says permission-denied, that is a setup problem, not a bag
+    bug.
+  - Prefer bundle ids (`com.barry.actions`) over display names. When a freshly
+    built copy runs alongside an installed one, both share the bundle id and the
+    tools refuse to guess — pass `pid` to choose. That refusal is deliberate:
+    asserting against the wrong process yields a green result that means
+    nothing.
+  - Elements are addressed by `AXIdentifier`, so an app is only as testable as
+    the identifiers it sets. An app with no identifiers can still be checked for
+    window health and screenshotted.
+  - Nothing here posts synthetic input. Actions are targeted accessibility
+    calls on elements inside the named app, so they cannot land in whatever
+    window happens to be frontmost.
+
+# Requires the Swift probe to be built: `swift build -c release` in the bag.
+# Not a `dependencies:` entry — that check looks for a binary on PATH, and this
+# is a build product inside the bag, so the check would always report missing.
+# `status` reports it instead, with the command to fix it.
+tools:
+  entry: tools.ts
+  # Situational: needed while discovering selectors or an app's name, not on
+  # every assertion. Both stay reachable through tool_search.
+  deferred:
+    - list_running_apps
+    - snapshot_ui
+
+tool-metadata:
+  - { toolName: status, namespace: macos-app-testing, access: read }
+  - { toolName: list_running_apps, namespace: macos-app-testing, access: read }
+  - { toolName: snapshot_ui, namespace: macos-app-testing, access: read }
+  - { toolName: list_windows, namespace: macos-app-testing, access: read }
+  - { toolName: find_element, namespace: macos-app-testing, access: read }
+  - { toolName: wait_for_element, namespace: macos-app-testing, access: read }
+  - { toolName: assert_window_healthy, namespace: macos-app-testing, access: read }
+  - { toolName: screenshot_app, namespace: macos-app-testing, access: read }
+  - { toolName: click_element, namespace: macos-app-testing, access: write }
+  - { toolName: set_element_value, namespace: macos-app-testing, access: write }
+
+dependencies:
+  - name: swift
+    reason: builds the accessibility probe
+
+# The read trait exists because inspecting and asserting is the common case, and
+# it is worth being able to grant that WITHOUT granting the ability to press
+# buttons in an app the user is sitting in front of.
+#
+# Neither name reuses the bag's auto-trait name: a manifest trait that does so
+# REPLACES the auto-trait rather than refining it (getAllTraits — "the manifest
+# wins"), silently discarding what it would otherwise carry.
+traits:
+  macos-app-driving:
+    description: Drive and assert native macOS app UI — inspect, assert, press and set values
+    access: readwrite
+    namespaces: [macos-app-testing]
+    skills: [macos-app-qa]
+  macos-app-inspection:
+    description: Inspect and assert native macOS app UI, without acting on it
+    access: read
+    namespaces: [macos-app-testing]
+    skills: [macos-app-qa]
