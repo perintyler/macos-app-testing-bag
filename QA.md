@@ -31,7 +31,7 @@ P=.build/release/axprobe
 swift build -c release && npx tsc --noEmit && npx vitest run
 ```
 
-**Expected:** exit 0, 34 tests passed.
+**Expected:** exit 0, 36 tests passed.
 
 ### 2. Permission is reported honestly
 
@@ -125,6 +125,24 @@ $P screenshot --app Finder --output /tmp/qa-finder.png && ls -la /tmp/qa-finder.
 Screen Recording permission it fails with that named as the cause, rather than
 writing an empty or black file.
 
+### 10. It works through the built bundle, not just src/
+
+Barry runs a bag's tools from `~/Library/Caches/Barry/bags/<name>-<hash>/`, not
+from this directory. A path resolved relative to the module works in `src/` and
+breaks there, and every earlier step would still pass.
+
+```bash
+barry install ~/repos/bags/macos-app-testing --force
+B=$(ls -dt ~/Library/Caches/Barry/bags/macos-app-testing-* | head -1)
+node --input-type=module -e "
+const m = await import('$B/tools.js');
+console.log(await m.status.handler({}, undefined));
+console.log((await m.assertWindowHealthy.handler({app:'Finder'}, undefined)).ok);
+"
+```
+
+**Expected:** `state: 'ready'` and `true` — not "axprobe is not built".
+
 ## Success Criteria
 
 - [ ] `swift build -c release`, `tsc --noEmit` and `vitest run` all pass
@@ -137,6 +155,7 @@ writing an empty or black file.
 - [ ] `find` and `snapshot` return real elements from a live app
 - [ ] `wait` returns immediately when present and fails at the timeout when not
 - [ ] `screenshot` writes a window-scoped PNG
+- [ ] the tools work when called through the built bundle, not only from `src/`
 
 ## Cleanup
 
