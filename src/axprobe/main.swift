@@ -69,6 +69,10 @@ let minElements = Int(option("min-elements") ?? "3") ?? 3
 // every screen shows the user its top and hides the rest.
 let maxOverflowFactor = Double(option("max-overflow-factor") ?? "1.5") ?? 1.5
 let valueOption = option("value")
+// Some elements are reachable only as another element's ATTRIBUTE, not as a
+// child in the AX tree — a scroll area's AXVerticalScrollBar is the case that
+// matters here, and it carries no identifier of its own to select by.
+let viaOption = option("via")
 let actionOption = option("action") ?? "AXPress"
 let outputOption = option("output")
 let maxDepth = Int(option("max-depth") ?? "40") ?? 40
@@ -504,7 +508,22 @@ case "set-value":
     // why there is no separate scroll command.
     let sel = requireSelector()
     guard let raw = valueOption else { fail("usage", "--value is required for set-value", exitCode: 2) }
-    let hit = requireElement(sel)
+    var hit = requireElement(sel)
+    // Hop to an attribute-referenced element when asked. Scrolling is
+    // `--selector id=MessageScrollView --via AXVerticalScrollBar --value 0`:
+    // still a targeted AX write to this app's own element, never a synthetic
+    // scroll-wheel event that could land in another window.
+    if let via = viaOption {
+        guard let raw = attr(hit, via) else {
+            fail("not-found", "element has no \(via) attribute")
+        }
+        guard CFGetTypeID(raw) == AXUIElementGetTypeID() else {
+            fail("not-found", "\(via) is not an accessibility element")
+        }
+        hit = (raw as! AXUIElement)
+    }
+    let priorRaw = attr(hit, kAXValueAttribute as String)
+    let priorValue: String? = (priorRaw as? NSNumber)?.stringValue ?? (priorRaw as? String)
     // A numeric string sets a number (scroll bars, sliders); anything else sets
     // a string. Guessing wrong yields kAXErrorIllegalArgument, reported below.
     let value: CFTypeRef = Double(raw).map { $0 as CFNumber } ?? (raw as CFString)
@@ -512,7 +531,42 @@ case "set-value":
     guard result == .success else {
         fail("set-value-failed", "setting AXValue failed with AXError \(result.rawValue)")
     }
-    emit(["ok": true, "value": raw, "element": describe(hit)])
+    // Read the value back. AXUIElementSetAttributeValue returning .success means
+    // the write was ACCEPTED, not that it took effect — a SwiftUI ScrollView
+    // reports success and ignores it, so a caller trusting the return code
+    // "scrolls" forever without moving. Reporting `applied` makes a write that
+    // does nothing visible instead of silently passing.
+    let readBack = attr(hit, kAXValueAttribute as String)
+    let observed: String? = (readBack as? NSNumber)?.stringValue ?? (readBack as? String)
+    // Three outcomes, not two. A SwiftUI ScrollView CLAMPS a scroll write —
+    // asking for 0 from 1.0 lands around 0.68 and moves the view a real
+    // distance — so treating "not exactly what I asked for" as failure would
+    // call working pagination broken. What must not pass silently is a write
+    // that changed nothing at all.
+    let before = priorValue.flatMap { Double($0) }
+    let after = observed.flatMap { Double($0) }
+    let exact = observed.map { obs in
+        if let want = Double(raw), let got = Double(obs) { return abs(want - got) < 0.001 }
+        return obs == raw
+    } ?? false
+    let moved: Bool = {
+        if exact { return true }
+        guard let b = before, let a = after else { return false }
+        return abs(a - b) > 0.001
+    }()
+
+    var out: [String: Any] = ["ok": moved, "value": raw, "element": describe(hit)]
+    if let observed { out["observed"] = observed }
+    if let priorValue { out["previous"] = priorValue }
+    out["exact"] = exact
+    if !moved {
+        out["error"] = "value-not-applied"
+        out["message"] = "the write was accepted but the value did not change "
+            + "(still \(observed ?? "unset")) — this control may not honour AX value writes."
+        emit(out)
+        exit(1)
+    }
+    emit(out)
 
 case "screenshot":
     // Window-scoped capture via screencapture(1) -l <windowID>, which the repo

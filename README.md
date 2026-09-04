@@ -72,6 +72,13 @@ Check both with `status` — it reports the real answer and distinguishes
 | `click_element` | write | `AXPress` an element — not a coordinate click |
 | `set_element_value` | write | Set `AXValue` — not synthetic typing |
 
+`set_element_value` reads the value back and fails if nothing changed:
+`AXUIElementSetAttributeValue` returning success means the write was *accepted*,
+not that it took effect. Use `via` to reach a control exposed only as another
+element's attribute — scrolling is `selector: MessageScrollView`,
+`via: AXVerticalScrollBar`, `value: 0`. SwiftUI clamps scroll writes, so a
+single call moves part of the way and `exact` reports whether it landed.
+
 ## Selectors
 
 An explicit matcher, not a query language:
