@@ -14,6 +14,7 @@
 
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -22,22 +23,50 @@ import { AxProbeError, classifyProbeFailure } from "./classify-error.js";
 const execFileAsync = promisify(execFile);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BAG_ROOT = resolve(HERE, "..");
+
+/**
+ * Where the bag's source lives, which is NOT where this module runs from.
+ *
+ * Barry bundles a bag's tools into ~/Library/Caches/Barry/bags/<name>-<hash>/
+ * before running them, so in production `import.meta.url` resolves into the
+ * cache and a path relative to it points at nothing. The Swift binary stays in
+ * the bag, so the bag directory has to be found rather than assumed:
+ *
+ *  1. BARRY_BAG_DIR / MACOS_APP_TESTING_DIR, when something sets it explicitly.
+ *  2. Relative to this module — correct in dev (running from src/) and for a
+ *     bundle that happens to sit in the bag.
+ *  3. The conventional checkout, which is where `barry install` registered it
+ *     from and where `swift build` puts the binary.
+ *
+ * Every candidate is probed for the binary rather than trusted, so a wrong
+ * guess falls through to the next instead of failing as "not built".
+ */
+function candidateRoots(): string[] {
+  const fromEnv = process.env.MACOS_APP_TESTING_DIR ?? process.env.BARRY_BAG_DIR;
+  return [
+    ...(fromEnv ? [fromEnv] : []),
+    resolve(HERE, ".."),
+    resolve(HERE, "../.."),
+    resolve(homedir(), "repos/bags/macos-app-testing"),
+  ];
+}
 
 /**
  * Release before debug: a stale debug build left over from development would
  * otherwise silently win over a fresh release one.
  */
-const BUILD_PATHS = [
-  resolve(BAG_ROOT, ".build/release/axprobe"),
-  resolve(BAG_ROOT, ".build/debug/axprobe"),
-];
+function buildPaths(): string[] {
+  return candidateRoots().flatMap((root) => [
+    resolve(root, ".build/release/axprobe"),
+    resolve(root, ".build/debug/axprobe"),
+  ]);
+}
 
 /** Default ceiling for a probe run. Waits are bounded by their own --timeout. */
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export function probeBinaryPath(): string | null {
-  return BUILD_PATHS.find((p) => existsSync(p)) ?? null;
+  return buildPaths().find((p) => existsSync(p)) ?? null;
 }
 
 /**
@@ -49,7 +78,8 @@ function requireBinary(): string {
   if (found) return found;
   throw new AxProbeError(
     "ax-error",
-    `axprobe is not built. Run \`swift build -c release\` in ${BAG_ROOT}.`,
+    "axprobe is not built. Run `swift build -c release` in the macos-app-testing bag " +
+      `(looked in: ${candidateRoots().join(", ")}), or set MACOS_APP_TESTING_DIR to it.`,
     [],
     "",
   );

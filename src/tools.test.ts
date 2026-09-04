@@ -93,3 +93,29 @@ describe("no synthetic input", () => {
     }
   }
 });
+
+/**
+ * The probe binary must be findable from wherever the tools actually run.
+ *
+ * Barry bundles a bag's tools into ~/Library/Caches/Barry/bags/<name>-<hash>/
+ * before running them. Resolving the binary relative to `import.meta.url` works
+ * in dev and breaks in production, where it points into the cache — the bag is
+ * registered and enabled, every tool loads, and the first call fails with
+ * "axprobe is not built". Found exactly that way.
+ */
+describe("probe binary resolution", () => {
+  it("finds the built binary", async () => {
+    const { probeBinaryPath } = await import("./probe.js");
+    const found = probeBinaryPath();
+    expect(found, "run `swift build -c release` first").not.toBeNull();
+    expect(found).toMatch(/\.build\/(release|debug)\/axprobe$/);
+  });
+
+  it("does not depend on the module's own location", async () => {
+    const source = readFileSync(resolve(HERE, "probe.ts"), "utf8");
+    // A single hardcoded root relative to import.meta.url is the bug: the
+    // search has to consider more than where this file happens to sit.
+    expect(source).toContain("candidateRoots");
+    expect(source).toMatch(/MACOS_APP_TESTING_DIR|BARRY_BAG_DIR/);
+  });
+});
