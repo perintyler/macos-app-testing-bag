@@ -455,7 +455,17 @@ case "window-health":
     } else {
         problems.append("window reports no position/size")
     }
-    let elements = countElements(window)
+    // Count through the app's own child tree rather than the element handed
+    // back by kAXWindowsAttribute. Those two references are not equivalent for
+    // every app: BarryIdentities' window reports 5 children via AXChildren and
+    // 0 via the windows-attribute handle, so counting the latter called a fully
+    // populated window empty. A false alarm is as damaging as a missed defect —
+    // it trains the reader to ignore the check.
+    let windowFromTree = children(axApp).first { el in
+        guard let f = frame(el), let wf = frame(window) else { return false }
+        return role(el) == "AXWindow" && f == wf
+    }
+    let elements = countElements(windowFromTree ?? window)
     if elements < minElements {
         problems.append("window subtree has \(elements) element(s) < required \(minElements) — hosted view is likely empty")
     }
