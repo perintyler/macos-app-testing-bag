@@ -1,4 +1,4 @@
-import { defineTool } from "@barry-rocks/tools";
+import { defineTool } from "@barry-rocks/sdk-bags";
 import { z } from "zod";
 import { probeArgs, runProbe } from "./probe.js";
 
