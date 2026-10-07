@@ -30,27 +30,11 @@ instructions: |
 # is a build product inside the bag, so the check would always report missing.
 # `status` reports it instead, with the command to fix it.
 tools:
-  entry: tools.ts
-  # Situational: needed while discovering selectors or an app's name, not on
-  # every assertion. Both stay reachable through tool_search.
-  deferred:
-    - list_running_apps
-    - snapshot_ui
-
-tool-metadata:
-  - { toolName: status, namespace: macos-app-testing, access: read }
-  - { toolName: list_running_apps, namespace: macos-app-testing, access: read }
-  - { toolName: snapshot_ui, namespace: macos-app-testing, access: read }
-  - { toolName: list_windows, namespace: macos-app-testing, access: read }
-  - { toolName: find_element, namespace: macos-app-testing, access: read }
-  - { toolName: wait_for_element, namespace: macos-app-testing, access: read }
-  - { toolName: assert_window_healthy, namespace: macos-app-testing, access: read }
-  - { toolName: screenshot_app, namespace: macos-app-testing, access: read }
-  - { toolName: click_element, namespace: macos-app-testing, access: write }
-  - { toolName: set_element_value, namespace: macos-app-testing, access: write }
+  - list_running_apps: deferred
+  - snapshot_ui: deferred
 
 dependencies:
-  - name: swift
+  swift:
     reason: builds the accessibility probe
 
 # The read trait exists because inspecting and asserting is the common case, and
@@ -62,12 +46,13 @@ dependencies:
 # wins"), silently discarding what it would otherwise carry.
 traits:
   macos-app-driving:
-    description: Drive and assert native macOS app UI — inspect, assert, press and set values
+    description: Drive and assert native macOS app UI — inspect, assert, press and
+      set values
     access: readwrite
-    namespaces: [macos-app-testing]
-    skills: [macos-app-qa]
+    namespaces: [ macos-app-testing ]
+    skills: [ macos-app-qa ]
   macos-app-inspection:
     description: Inspect and assert native macOS app UI, without acting on it
     access: read
-    namespaces: [macos-app-testing]
-    skills: [macos-app-qa]
+    namespaces: [ macos-app-testing ]
+    skills: [ macos-app-qa ]
