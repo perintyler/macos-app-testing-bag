@@ -36,23 +36,3 @@ tools:
 dependencies:
   swift:
     reason: builds the accessibility probe
-
-# The read trait exists because inspecting and asserting is the common case, and
-# it is worth being able to grant that WITHOUT granting the ability to press
-# buttons in an app the user is sitting in front of.
-#
-# Neither name reuses the bag's auto-trait name: a manifest trait that does so
-# REPLACES the auto-trait rather than refining it (getAllTraits — "the manifest
-# wins"), silently discarding what it would otherwise carry.
-traits:
-  macos-app-driving:
-    description: Drive and assert native macOS app UI — inspect, assert, press and
-      set values
-    access: readwrite
-    namespaces: [ macos-app-testing ]
-    skills: [ macos-app-qa ]
-  macos-app-inspection:
-    description: Inspect and assert native macOS app UI, without acting on it
-    access: read
-    namespaces: [ macos-app-testing ]
-    skills: [ macos-app-qa ]
